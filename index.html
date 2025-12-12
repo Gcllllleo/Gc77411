@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini 3D Particle Magic</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050505; color: white; }
+        canvas { display: block; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
+    </style>
+    
+    <!-- Import Map for Modules -->
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "three": "https://esm.sh/three@0.160.0",
+    "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.15.16?external=react,react-dom,three",
+    "@react-three/drei": "https://esm.sh/@react-three/drei@9.99.0?external=react,react-dom,three,@react-three/fiber",
+    "@google/genai": "https://esm.sh/@google/genai@0.1.2",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/"
+  }
+}
+</script>
+    <!-- Babel for in-browser compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module" data-presets="typescript,react">
+        import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import * as THREE from 'three';
+        import { Canvas, useFrame } from '@react-three/fiber';
+        import { OrbitControls } from '@react-three/drei';
+        import { GoogleGenAI } from '@google/genai';
+
+        // --- Types & Constants ---
+        
+        const ParticleShape = {
+            GALAXY: 'GALAXY',
+            HEART: 'HEART',
+            FLOWER: 'FLOWER',
+            SATURN: 'SATURN',
+            FIREWORKS: 'FIREWORKS'
+        };
+
+        const COLORS = {
+            [ParticleShape.HEART]: '#ff0055',
+            [ParticleShape.GALAXY]: '#00ffff',
+            [ParticleShape.FLOWER]: '#ff69b4',
+            [ParticleShape.SATURN]: '#ffa500',
+            [ParticleShape.FIREWORKS]: '#ffffff',
+        };
+
+        const PARTICLE_COUNT = 8000;
+
+        // --- Logic: Particle Generation ---
+
+        const randomInSphere = (radius) => {
+            const u = Math.random();
+            const v = Math.random();
+            const theta = 2 * Math.PI * u;
+            const phi = Math.acos(2 * v - 1);
+            const r = Math.cbrt(Math.random()) * radius;
+            const sinPhi = Math.sin(phi);
+            return new THREE.Vector3(
+                r * sinPhi * Math.cos(theta),
+                r * sinPhi * Math.sin(theta),
+                r * Math.cos(phi)
+            );
+        };
+
+        const generateParticles = (shape, count) => {
+            const positions = new Float32Array(count * 3);
+            
+            for (let i = 0; i < count; i++) {
+                const i3 = i * 3;
+                let x = 0, y = 0, z = 0;
+
+                switch (shape) {
+                    case ParticleShape.HEART: {
+                        const t = Math.random() * Math.PI * 2;
+                        const scale = 0.5;
+                        const fuzz = 0.5; 
+                        x = (16 * Math.pow(Math.sin(t), 3)) * scale + (Math.random() - 0.5) * fuzz;
+                        y = (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * scale + (Math.random() - 0.5) * fuzz;
+                        z = (Math.random() - 0.5) * 4; 
+                        break;
+                    }
+                    case ParticleShape.GALAXY: {
+                        const branches = 3;
+                        const radius = Math.random() * 10;
+                        const spinAngle = radius * 0.8;
+                        const branchAngle = ((i % branches) / branches) * Math.PI * 2;
+                        
+                        const randomX = Math.pow(Math.random(), 3) * (Math.random() < 0.5 ? 1 : -1) * 0.5;
+                        const randomY = Math.pow(Math.random(), 3) * (Math.random() < 0.5 ? 1 : -1) * 0.5;
+                        const randomZ = Math.pow(Math.random(), 3) * (Math.random() < 0.5 ? 1 : -1) * 0.5;
+
+                        x = Math.cos(branchAngle + spinAngle) * radius + randomX;
+                        y = randomY * 2;
+                        z = Math.sin(branchAngle + spinAngle) * radius + randomZ;
+                        break;
+                    }
+                    case ParticleShape.SATURN: {
+                        const isRing = Math.random() > 0.3;
+                        if (isRing) {
+                            const innerR = 6;
+                            const outerR = 12;
+                            const r = innerR + Math.random() * (outerR - innerR);
+                            const theta = Math.random() * Math.PI * 2;
+                            x = r * Math.cos(theta);
+                            z = r * Math.sin(theta);
+                            y = (Math.random() - 0.5) * 0.2;
+                        } else {
+                            const p = randomInSphere(4);
+                            x = p.x; y = p.y; z = p.z;
+                        }
+                        break;
+                    }
+                    case ParticleShape.FLOWER: {
+                        const theta = Math.random() * Math.PI * 2;
+                        const phi = Math.random() * Math.PI;
+                        const k = 4;
+                        const r = 8 * Math.cos(k * theta) * Math.sin(phi);
+                        x = r * Math.sin(phi) * Math.cos(theta);
+                        y = r * Math.cos(phi);
+                        z = r * Math.sin(phi) * Math.sin(theta);
+                        x += (Math.random() - 0.5);
+                        y += (Math.random() - 0.5);
+                        z += (Math.random() - 0.5);
+                        break;
+                    }
+                    case ParticleShape.FIREWORKS: {
+                        const p = randomInSphere(10);
+                        x = p.x; y = p.y; z = p.z;
+                        break;
+                    }
+                }
+                positions[i3] = x;
+                positions[i3 + 1] = y;
+                positions[i3 + 2] = z;
+            }
+            return { positions };
+        };
+
+        // --- Service: Gemini Live ---
+
+        class GeminiLiveService {
+            constructor(apiKey, onUpdate) {
+                this.ai = new GoogleGenAI({ apiKey });
+                this.onControlUpdate = onUpdate;
+                this.sessionPromise = null;
+            }
+
+            async connect() {
+                const controlParticlesTool = {
+                    name: 'controlParticles',
+                    parameters: {
+                        type: 'OBJECT',
+                        description: 'Update the 3D particle system based on user hand gestures.',
+                        properties: {
+                            scaleDelta: {
+                                type: 'NUMBER',
+                                description: 'Change in size. Positive (0.1 to 0.5) to expand, negative (-0.1 to -0.5) to shrink.',
+                            },
+                            rotationDelta: {
+                                type: 'NUMBER',
+                                description: 'Change in rotation speed. Positive value (e.g., 0.5) if user is waving.',
+                            },
+                            detectedShape: {
+                                type: 'STRING',
+                                description: 'Name of shape if user mimics a shape (e.g., "HEART").',
+                            },
+                        },
+                    },
+                };
+
+                const config = {
+                    model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+                    config: {
+                        responseModalities: ['AUDIO'],
+                        systemInstruction: `
+                            You are a visual gesture controller. Analyze the video stream.
+                            1. Two hands moving APART -> controlParticles(scaleDelta: 0.2)
+                            2. Two hands moving TOGETHER/PINCHING -> controlParticles(scaleDelta: -0.2)
+                            3. Hand WAVING -> controlParticles(rotationDelta: 0.5)
+                            4. Hand HEART shape -> controlParticles(detectedShape: "HEART")
+                            5. THUMBS UP -> controlParticles(detectedShape: "GALAXY")
+                        `,
+                        tools: [{ functionDeclarations: [controlParticlesTool] }],
+                    },
+                    callbacks: {
+                        onopen: () => console.log('Gemini Live Connected'),
+                        onclose: () => console.log('Gemini Live Closed'),
+                        onerror: (e) => console.error('Gemini Live Error', e),
+                        onmessage: (msg) => this.handleMessage(msg),
+                    },
+                };
+
+                this.sessionPromise = this.ai.live.connect(config);
+                await this.sessionPromise;
+            }
+
+            handleMessage(message) {
+                if (message.toolCall) {
+                    for (const fc of message.toolCall.functionCalls) {
+                        if (fc.name === 'controlParticles') {
+                            this.onControlUpdate(fc.args);
+                            this.sessionPromise?.then(session => {
+                                session.sendToolResponse({
+                                    functionResponses: {
+                                        id: fc.id,
+                                        name: fc.name,
+                                        response: { result: 'updated' }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                }
+            }
+
+            async sendFrame(base64Image) {
+                if (!this.sessionPromise) return;
+                const session = await this.sessionPromise;
+                session.sendRealtimeInput({
+                    media: {
+                        mimeType: 'image/jpeg',
+                        data: base64Image
+                    }
+                });
+            }
+        }
+
+        // --- Component: ParticleSystem ---
+
+        const ParticleSystem = ({ shape, color, scale, rotationSpeed }) => {
+            const pointsRef = useRef(null);
+            const materialRef = useRef(null);
+            
+            const { positions } = useMemo(() => generateParticles(shape, PARTICLE_COUNT), [shape]);
+            
+            const bufferGeometry = useMemo(() => {
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                return geo;
+            }, [positions]);
+
+            useFrame((state, delta) => {
+                if (pointsRef.current) {
+                    pointsRef.current.rotation.y += rotationSpeed * delta * 0.5;
+                    pointsRef.current.rotation.x += rotationSpeed * delta * 0.1;
+                    pointsRef.current.position.y = Math.sin(state.clock.elapsedTime * 0.5) * 0.5;
+                }
+                if (materialRef.current) {
+                    materialRef.current.color.lerp(new THREE.Color(color), delta * 2);
+                }
+            });
+
+            return (
+                <points ref={pointsRef} geometry={bufferGeometry} scale={[scale, scale, scale]}>
+                    <pointsMaterial
+                        ref={materialRef}
+                        size={0.15}
+                        color={color}
+                        transparent
+                        opacity={0.8}
+                        blending={THREE.AdditiveBlending}
+                        sizeAttenuation={true}
+                        depthWrite={false}
+                    />
+                </points>
+            );
+        };
+
+        // --- Component: Controls ---
+
+        const Controls = ({ currentShape, setShape, currentColor, setColor, isLive, toggleLive, toggleFullscreen, status }) => {
+            return (
+                <div className="absolute top-0 left-0 w-full h-full pointer-events-none flex flex-col justify-between p-6">
+                    <div className="pointer-events-auto flex justify-between items-start">
+                        <div className="bg-black/40 backdrop-blur-md p-4 rounded-xl border border-white/10 shadow-xl max-w-sm">
+                            <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-600">
+                                Gemini Particles
+                            </h1>
+                            <p className="text-xs text-gray-300 mt-1">{status}</p>
+                            <div className="mt-2 flex items-center space-x-2 text-xs text-gray-400">
+                                <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+                                <span>Vision AI: {isLive ? 'Active' : 'Offline'}</span>
+                            </div>
+                        </div>
+                        <button onClick={toggleFullscreen} className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-lg transition-all border border-white/10 backdrop-blur-md">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div className="pointer-events-auto self-center md:self-end bg-black/60 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-2xl w-full max-w-xs transition-all">
+                        {!isLive && (
+                             <button onClick={toggleLive} className="w-full mb-6 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-semibold py-3 px-4 rounded-xl transition-all shadow-lg transform hover:scale-[1.02]">
+                                 Start Camera & AI
+                             </button>
+                        )}
+                        <div className="mb-6">
+                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 block">Model</label>
+                            <div className="grid grid-cols-3 gap-2">
+                                {Object.values(ParticleShape).map((shape) => (
+                                    <button
+                                        key={shape}
+                                        onClick={() => setShape(shape)}
+                                        className={`text-xs py-2 rounded-lg border transition-all ${currentShape === shape ? 'bg-white text-black border-white font-bold' : 'bg-transparent text-gray-300 border-white/20 hover:border-white/50'}`}
+                                    >
+                                        {shape}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="mb-4">
+                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 block">Color</label>
+                            <div className="flex items-center space-x-3">
+                                <input type="color" value={currentColor} onChange={(e) => setColor(e.target.value)} className="w-10 h-10 rounded-lg cursor-pointer border-0 p-0 bg-transparent" />
+                                <span className="text-sm font-mono text-gray-300">{currentColor}</span>
+                            </div>
+                        </div>
+                        <div className="mt-4 p-3 bg-white/5 rounded-lg border border-white/5">
+                            <p className="text-[10px] text-gray-400 leading-relaxed">
+                                <strong className="text-white">Gestures:</strong><br/>
+                                👋 Wave to rotate<br/>
+                                👐 Spread hands to expand<br/>
+                                🤏 Pinch hands to shrink<br/>
+                                🫶 Heart gesture for Heart Mode
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Main App ---
+
+        const App = () => {
+            const [state, setState] = useState({
+                shape: ParticleShape.GALAXY,
+                color: COLORS[ParticleShape.GALAXY],
+                scale: 1,
+                rotationSpeed: 0.2,
+                count: 8000
+            });
+            const [isLive, setIsLive] = useState(false);
+            const [status, setStatus] = useState("Ready to start");
+            
+            const videoRef = useRef(null);
+            const canvasRef = useRef(null);
+            const geminiServiceRef = useRef(null);
+            const intervalRef = useRef(null);
+
+            const handleShapeChange = (shape) => setState(prev => ({ ...prev, shape, color: COLORS[shape] }));
+            const handleColorChange = (color) => setState(prev => ({ ...prev, color }));
+            
+            const toggleFullscreen = () => {
+                if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+                else document.exitFullscreen();
+            };
+
+            const onGeminiControl = useCallback((payload) => {
+                setState(prev => {
+                    let newState = { ...prev };
+                    if (payload.scaleDelta) {
+                        const targetScale = prev.scale + payload.scaleDelta;
+                        newState.scale = Math.max(0.1, Math.min(3.0, targetScale));
+                    }
+                    if (payload.rotationDelta) {
+                        newState.rotationSpeed = Math.max(0.1, Math.min(2.0, prev.rotationSpeed + payload.rotationDelta));
+                    } else {
+                        newState.rotationSpeed = Math.max(0.1, prev.rotationSpeed * 0.95);
+                    }
+                    if (payload.detectedShape) {
+                        const shapeKey = payload.detectedShape.toUpperCase();
+                        if (ParticleShape[shapeKey]) {
+                            newState.shape = ParticleShape[shapeKey];
+                            newState.color = COLORS[ParticleShape[shapeKey]];
+                        }
+                    }
+                    return newState;
+                });
+                setStatus(`AI: ${payload.detectedShape || (payload.scaleDelta ? 'Scaling' : 'Rotating')}`);
+                setTimeout(() => setStatus("Watching..."), 1000);
+            }, []);
+
+            const startGeminiLive = async () => {
+                try {
+                    setStatus("Init Camera...");
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = stream;
+                        await videoRef.current.play();
+                    }
+                    
+                    // Note: In a real environment, use process.env.API_KEY. 
+                    // For this standalone HTML demo, we assume the environment injects it or it's handled.
+                    // If running locally, you might need to insert your key here manually if env is missing.
+                    const apiKey = (window.process && window.process.env && window.process.env.API_KEY) || process.env.API_KEY; 
+
+                    setStatus("Connecting AI...");
+                    const service = new GeminiLiveService(apiKey, onGeminiControl);
+                    await service.connect();
+                    geminiServiceRef.current = service;
+                    setIsLive(true);
+                    setStatus("Connected! Move hands.");
+                    startFrameStreaming();
+                } catch (error) {
+                    console.error(error);
+                    setStatus("Error: " + error.message);
+                    setIsLive(false);
+                }
+            };
+
+            const startFrameStreaming = () => {
+                if (intervalRef.current) clearInterval(intervalRef.current);
+                intervalRef.current = window.setInterval(() => {
+                    if (!videoRef.current || !canvasRef.current || !geminiServiceRef.current) return;
+                    const video = videoRef.current;
+                    const canvas = canvasRef.current;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx && video.videoWidth > 0) {
+                        canvas.width = 640; canvas.height = 480;
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        const base64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+                        geminiServiceRef.current.sendFrame(base64);
+                    }
+                }, 500); // 2 FPS
+            };
+
+            useEffect(() => {
+                return () => {
+                    if (intervalRef.current) clearInterval(intervalRef.current);
+                    if (videoRef.current && videoRef.current.srcObject) {
+                        videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+                    }
+                };
+            }, []);
+
+            return (
+                <div className="relative w-full h-screen bg-neutral-900 overflow-hidden">
+                    <video ref={videoRef} className="hidden" playsInline muted />
+                    <canvas ref={canvasRef} className="hidden" />
+                    <Canvas camera={{ position: [0, 0, 15], fov: 60 }}>
+                        <color attach="background" args={['#050505']} />
+                        <ambientLight intensity={0.5} />
+                        <ParticleSystem {...state} />
+                        <OrbitControls enableZoom={false} enablePan={false} />
+                    </Canvas>
+                    <Controls 
+                        currentShape={state.shape}
+                        setShape={handleShapeChange}
+                        currentColor={state.color}
+                        setColor={handleColorChange}
+                        isLive={isLive}
+                        toggleLive={startGeminiLive}
+                        toggleFullscreen={toggleFullscreen}
+                        status={status}
+                    />
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
